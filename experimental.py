@@ -1,12 +1,18 @@
 """Experimental modules and functions."""
 
+from typing import Optional, Callable
 import torch
 import math
 from torch import nn
 from torch import Tensor
+import pytorch_lightning as pl
 import numpy as np
 import scipy as sp
-from sklearn.metrics import roc_auc_score
+import pandas as pd
+from pytorch_lightning.utilities.cli import instantiate_class
+from sklearn.metrics import roc_curve, auc
+# import sktime
+from sktime.transformations.panel.rocket import MiniRocketMultivariate
 
 
 ########################################
@@ -14,7 +20,7 @@ from sklearn.metrics import roc_auc_score
 ########################################
 
 
-class AnoGenAdvNet(nn.Module):
+class AnoGenAdvNet(pl.LightningModule):
     """Generative adversarial network for anomaly detection."""
 
     def __init__(
@@ -24,11 +30,29 @@ class AnoGenAdvNet(nn.Module):
         discriminator: nn.Module,
         encoder: nn.Module,
         dim_latent: int,
-        ratio=1
+        training_phase: str = 'encoder',
+        ratio: float = 1.0,
+        penalty_coef: float = 10.0,
+        fid_feat_init: Optional[dict] = None,
+        gen_opt_init: Optional[dict] = None,
+        disc_opt_init: Optional[dict] = None,
+        enc_opt_init: Optional[dict] = None
     ):
         """
-        Initialize with the generator, discriminator (along with its feature
-        extractor), and encoder.
+        Arguments
+        ---------
+        generator: Generator module
+        extractor: Feature extractor module during discrimination
+        discriminator: Discriminator module following feature extractor
+        encoder: Encoder module
+        dim_latent: Dimension of latent space
+        training_phase: Indicator of `'adversarial'` or `'encoder'` training
+        ratio: Weight of feature matching error in anomaly score
+        penalty_coef: Coefficient of gradient penalty in adversarial training
+        fid_feat_init: Class and arguments to instantiate FID feature module
+        gen_opt_init: Class and arguments to instantiate optimizer of generator
+        disc_opt_init: Class and arguments to instantiate optimizer of discriminator
+        enc_opt_init: Class and arguments to instantiate optimizer of encoder
 
         Pre-conditions
         --------------
@@ -49,19 +73,77 @@ class AnoGenAdvNet(nn.Module):
         54, 30-44.
         """
         super().__init__()
+        # Submodules
         self.gen = generator
         self.feat = extractor
         self.disc = discriminator
         self.enc = encoder
-        self.r = ratio
+        # Model parameters
         self.dim = dim_latent
+        self.r = ratio
+        self.freeze_by_phase(training_phase)
+        self.phase = training_phase
+        # Loss functions
+        self.lossfn_gen = GenWassersteinLoss(self)
+        self.lossfn_disc = DiscWassersteinGradPenLoss(self, penalty_coef)
+        self.lossfn_enc = self.anomaly_score
+        # Validation function
+        if fid_feat_init is None:
+            fid_feat_init = {
+                'class_path': MiniRocket,
+                'init_args': {}
+            }
+        self.fidfn = FrechetInceptionDistance(
+            instantiate_class(fid_feat_init)
+        )
+        # Optimizer parameters
+        if gen_opt_init is None:
+            gen_opt_init = {
+                'class_path': torch.optim.AdamW,
+                'init_args': {'lr': 4e-3}
+            }
+        self.gen_opt_init = gen_opt_init
+        if disc_opt_init is None:
+            disc_opt_init = {
+                'class_path': torch.optim.AdamW,
+                'init_args': {'lr': 1e-3}
+            }
+        self.disc_opt_init = disc_opt_init
+        if enc_opt_init is None:
+            enc_opt_init = {
+                'class_path': torch.optim.AdamW,
+                'init_args': {'lr': 1e-3}
+            }
+        self.enc_opt_init = enc_opt_init
     
-    def forward(self, data: Tensor):
-        """Return the anomaly score."""
-        recon = self.reconstruct(data)
-        score = self.reconstruction_err(data, recon)
-        score += self.feature_err(data, recon) * self.r
-        return score
+    def freeze_by_phase(self, phase):
+        """Freeze part of the model according to training phase."""
+        if phase == 'adversarial':
+            self.gen.requires_grad_(True)
+            self.feat.requires_grad_(True)
+            self.disc.requires_grad_(True)
+            self.enc.requires_grad_(False)
+        elif phase == 'encoder':
+            self.gen.requires_grad_(False)
+            self.feat.requires_grad_(False)
+            self.disc.requires_grad_(False)
+            self.enc.requires_grad_(True)
+        else:
+            raise ValueError(f'invalid training phase {phase}')
+
+    def generate(self, batch_size, device=None):
+        """Return generated data from the generator."""
+        # Generate data from prior samples
+        samples = torch.randn(batch_size, self.dim, device=device)
+        return self.gen(samples)
+    
+    def discriminate(self, data: Tensor):
+        """Return the discrimination score."""
+        return self.disc(self.feat(data))
+
+    def reconstruct(self, data: Tensor):
+        """Return the reconstruction through the encoder and generator."""
+        return self.gen(self.enc(data))
 
     def reconstruction_err(self, real: Tensor, fake: Tensor):
         """Return the reconstruction error of the encoder and generator."""
@@ -74,30 +156,67 @@ class AnoGenAdvNet(nn.Module):
         sz = real.size(0)
         real, fake = self.feat(real).view(sz, -1), self.feat(fake).view(sz, -1)
         return (real - fake).pow(2).mean(dim=1)
-
-    def reconstruct(self, data: Tensor):
-        """Return the reconstruction through the encoder and generator."""
-        return self.gen(self.enc(data))
-
-    def generate(self, batch_size, device=None):
-        """Return generated data from the generator."""
-        # Generate data from prior samples
-        samples = torch.randn(batch_size, self.dim, device=device)
-        return self.gen(samples)
     
-    def discriminate(self, data: Tensor):
-        """Return the discrimination score."""
-        return self.disc(self.feat(data))
-
-    def freeze_generator_discriminator(self):
-        """Un-track gradient of the generator and the discriminator."""
-        self.gen.requires_grad_(False)
-        self.feat.requires_grad_(False)
-        self.disc.requires_grad_(False)
+    def anomaly_score(self, data: Tensor):
+        """Return the anomaly score."""
+        recon = self.reconstruct(data)
+        score = self.reconstruction_err(data, recon)
+        score += self.feature_err(data, recon) * self.r
+        return score
 
     def residual(self, data: Tensor):
         """Return the residual between the data and its reconstruction."""
         return (data - self.reconstruct(data)).abs()
+    
+    def forward(self, data: Tensor):
+        return self.anomaly_score(data)
+    
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        data, _ = batch
+        if self.phase == 'adversarial':
+            if optimizer_idx == 0:  # train generator
+                loss = self.lossfn_gen(data)
+                self.log('Loss/Generator', loss)
+            if optimizer_idx == 1:  # train discriminator
+                loss = self.lossfn_disc(data)
+                self.log('Loss/Discriminator', loss)
+        else:  # train encoder
+            loss = self.lossfn_enc(data)
+            self.log('Loss/Encoder', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        data, labels = batch
+        if self.phase == 'adversarial':  # validate adversarial training
+            fake = self.generate(len(data), device=data.device)
+            fid = self.fidfn(data, fake)
+            self.log('FID', fid)
+        else:  # validate encoder training
+            scores = self.anomaly_score(data)
+            roc_auc, acc = roc_performance(labels, scores)
+            self.log('ROC AUC', roc_auc)
+            self.log('Accuracy', acc)
+
+    def configure_optimizers(self):
+        if self.phase == 'adversarial':
+            gen_optimizer = instantiate_class(
+                self.gen.parameters(),
+                self.gen_opt_init
+            )
+            disc_optimizer = instantiate_class(
+                nn.ModuleList([self.feat, self.disc]).parameters(),
+                self.disc_opt_init
+            )
+            return (
+                {'optimizer': gen_optimizer},
+                {'optimizer': disc_optimizer},
+            )
+        else:
+            enc_optimizer = instantiate_class(
+                self.enc.parameters(),
+                self.enc_opt_init
+            )
+            return {'optimizer': enc_optimizer}
 
 
 ####################################
@@ -174,56 +293,13 @@ class DiscWassersteinGradPenLoss(nn.Module):
 
 
 ####################################
-###  Training
+###  Validation
 ####################################
 
 
-def train_generator_discriminator(
-    dataloader,
-    loss_fn_disc,
-    loss_fn_gen,
-    optimizer_gen,
-    optimizer_disc,
-    n_disc=1
-):
-    """Train the generator and discriminator in alternations."""
-    for batch, data in enumerate(dataloader):
-        # Update the discriminator
-        loss_disc = loss_fn_disc(data)
-        optimizer_disc.zero_grad()
-        loss_disc.backward()
-        optimizer_disc.step()
-        # Update the generator every `n_disc` batches
-        if (batch + 1) % n_disc == 0:
-            loss_gen = loss_fn_gen(data)
-            optimizer_gen.zero_grad()
-            loss_gen.backward()
-            optimizer_gen.step()
-
-
-def train_encoder(dataloader, model: AnoGenAdvNet, optimizer):
-    """Train the encoder of `model` to minimize the output anomaly score."""
-    for batch, data in enumerate(dataloader):
-        # Update the model
-        loss = model(data)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-
-####################################
-###  Evaluation
-####################################
-
-
-def frechet_inception_distance(real: Tensor, fake: Tensor, feature: nn.Module):
-    """
-    Return the Frechet incepction distance between features of the real and
-    the generated data.
-
-    Pre-condition
-    -------------
-    `real` and `fake` must have the same shape.
+class FrechetInceptionDistance(nn.Module):
+    """"
+    Frechet inception distance module.
 
     Notes
     -----
@@ -234,47 +310,92 @@ def frechet_inception_distance(real: Tensor, fake: Tensor, feature: nn.Module):
     2. The formula approximates the data with multivariate Gaussian
        distributions.
     """
-    # Flatten the feature vector for individual samples
-    real = feature(real).view(real.size(0), -1)
-    fake = feature(fake).view(fake.size(0), -1)
-    # Compute the Frechet inception distance
-    dist = np.linalg.norm(real.mean(dim=0) - fake.mean(dim=0)) ** 2
-    cov_r, cov_f = np.cov(real.T), np.cov(fake.T)  # covariance matrices
-    dist += np.trace(cov_r + cov_f - 2 * sp.linalg.sqrtm(cov_r.dot(cov_f)))
-    return dist
+
+    def __init__(self, feature: nn.Module):
+        """
+        Arguments
+        ---------
+        feature: Feature extractor acted upon real/generated data
+        """
+        super().__init__()
+        self.feat = feature
+    
+    def forward(self, real: torch.Tensor, fake: torch.Tensor):
+        """
+        Return the Frechet incepction distance between features of the real
+        and the generated data.
+
+        Pre-condition
+        -------------
+        `real` and `fake` must have the same shape.
+        """
+        # Flatten the feature vector for individual samples
+        real = self.feat(real).view(real.size(0), -1)
+        fake = self.feat(fake).view(fake.size(0), -1)
+        # Compute the Frechet inception distance
+        dist = np.linalg.norm(real.mean(dim=0) - fake.mean(dim=0)) ** 2
+        cov_r, cov_f = np.cov(real.T), np.cov(fake.T)  # covariance matrices
+        dist += np.trace(cov_r + cov_f - 2 * sp.linalg.sqrtm(cov_r.dot(cov_f)))
+        return dist
 
 
-def generator_discriminator_evaluation(
-    dataloader,
-    model: AnoGenAdvNet,
-    feature: nn.Module
-):
+class MiniRocket(nn.Module):
     """
-    Return the Frechet inception distance between real and generated data
-    under a given feature extraction.
+    MiniRocket module to extract features from time series
+
+    Notes
+    -----
+    1. This adopted implementation supposes that data (e.g., validation set)
+       only has a single batch.
+    2. See for reference Dempster, A., Schmidt, D. F., & Webb, G. I. (2021).
+       Minirocket: A very fast (almost) deterministic transform for time series
+       classification. In Proceedings of the 27th ACM SIGKDD Conference on
+       Knowledge Discovery & Data Mining (pp. 248-257).
+    """
+
+    def __init__(self, **kwargs):
+        """
+        Arguments
+        ---------
+        kwargs: Keyword arguments passed to MiniRocketMultivariate
+        """
+        super().__init__()
+        self.minirocket = MiniRocketMultivariate(**kwargs)
+
+    def forward(self, data: torch.Tensor):
+        """Return the transformed features from time series data."""
+        data = pd.DataFrame({  # convert time series to sktime format
+            f'dim_{var_idx}': [
+                pd.Series(data[ts_idx, var_idx])
+                for ts_idx in range(data.size(0))
+            ]
+            for var_idx in range(data.size(1))
+        })
+        if not self.minirocket.check_is_fitted(): self.minirocket.fit(data)
+        feats = self.minirocket.transform(data)
+        feats = data.new_tensor(feats.values)  # convert features to tensor
+        return feats
+
+
+def roc_performance(labels: torch.Tensor, scores: torch.Tensor):
+    """
+    Return the area under ROC curve and the accuracy at the cut-off point that
+    maximizes the sum of sensitivity and specificity.
+
+    Arguments
+    ---------
+    labels: Binary annotation of data that takes value of either 0 or 1
+    scores: Predicted probabilities/scores for classification
 
     Pre-condition
     -------------
-    `dataloader` should iterate over only one batch.
+    `labels` and `scores` must have the same shape.
     """
-    with torch.no_grad():
-        real, _ = next(iter(dataloader))
-        fake = model.generate(len(real), device=real.device)
-    return frechet_inception_distance(real, fake, feature)
-
-
-def model_evaluation(dataloader, model: AnoGenAdvNet):
-    """
-    Return the area under the ROC curve of `model`.
-
-    Pre-condition
-    -------------
-    `dataloader` should iterate over only one batch.
-    """
-    with torch.no_grad():
-        data, labels = next(iter(dataloader))
-        scores = model(data)  # anomaly score from `model`
-    return roc_auc_score(labels, scores)
+    fpr, tpr, threshold = roc_curve(labels, scores)
+    roc_auc = auc(fpr, tpr)
+    cutoff = threshold[np.argmax(tpr - fpr)]
+    acc = ((scores >= cutoff) == labels).float().mean().item()
+    return roc_auc, acc
 
 
 ##################################################
@@ -290,35 +411,38 @@ class FreqAttnAnoGenAdvNet(AnoGenAdvNet):
         dim_latent: int,
         num_vars: int,
         num_steps: int,
-        kwargs_gen: dict = {},
-        kwargs_disc: dict = {},
-        kwargs_enc: dict = {}
+        gen_init_args: Optional[dict] = None,
+        disc_init_args: Optional[dict] = None,
+        enc_init_args: Optional[dict] = None,
+        **kwargs
     ):
         """
         Arguments
         ---------
-            dim_latent: Dimension of the latent space
-            num_vars: Number of variables in the time series data
-            num_steps: Number of timesteps in the time series data
-            kwargs_gen: Keyword arguments passed to the generator
-            kwargs_disc: Keyword arguments passed to the discriminator
-            kwargs_enc: Keyword arguments passed to the encoder
+        dim_latent: Dimension of the latent space
+        num_vars: Number of variables in the time series data
+        num_steps: Number of timesteps in the time series data
+        gen_init_args: Keyword arguments passed to the generator
+        disc_init_args: Keyword arguments passed to the discriminator
+        enc_init_args: Keyword arguments passed to the encoder
+        kwargs: Keyword arguments passed to the AnoGenAdvNet superclass
         """
         args = (dim_latent, num_vars, num_steps)
-        generator = FreqAttnDecoder(*args, **kwargs_gen)
-        extractor = FreqAttnEncoder(*args, **kwargs_disc)
+        if gen_init_args is None: gen_init_args = {}
+        generator = FreqAttnDecoder(*args, **gen_init_args)
+        if disc_init_args is None: disc_init_args = {}
+        extractor = FreqAttnEncoder(*args, **disc_init_args)
         discriminator = nn.Linear(dim_latent, 1)
-        encoder = FreqAttnEncoder(*args, **kwargs_enc)
+        if enc_init_args is None: enc_init_args = {}
+        encoder = FreqAttnEncoder(*args, **enc_init_args)
         super().__init__(
             generator,
             extractor,
             discriminator,
             encoder,
-            dim_latent
+            dim_latent,
+            **kwargs
         )
-        self.dim_latent = dim_latent
-        self.num_vars = num_vars
-        self.num_feats = num_steps
 
 
 class FreqAttnEncoder(nn.Module):
@@ -340,13 +464,13 @@ class FreqAttnEncoder(nn.Module):
         """
         Arguments
         ---------
-            dim_latent: Dimension of the latent space
-            num_vars: Number of variables in the time series data
-            num_steps: Number of timesteps in the time series data
-            num_blocks: Number of structurally similar computation blocks
-            num_attnlayers: Number of attention layers per block
-            num_attnheads: Number of attention heads
-            attn_actv: Activation function in attention modules
+        dim_latent: Dimension of the latent space
+        num_vars: Number of variables in the time series data
+        num_steps: Number of timesteps in the time series data
+        num_blocks: Number of structurally similar computation blocks
+        num_attnlayers: Number of attention layers per block
+        num_attnheads: Number of attention heads
+        attn_actv: Activation function in attention modules
         """
         super().__init__()
         self.dim_latent = dim_latent
@@ -454,13 +578,13 @@ class FreqAttnDecoder(nn.Module):
         """
         Arguments
         ---------
-            dim_latent: Dimension of the latent space
-            num_vars: Number of variables in the time series data
-            num_steps: Number of timesteps in the time series data
-            num_blocks: Number of structurally similar computation blocks
-            num_attnlayers: Number of attention layers per block
-            num_attnheads: Number of attention heads
-            attn_actv: Activation function in attention modules
+        dim_latent: Dimension of the latent space
+        num_vars: Number of variables in the time series data
+        num_steps: Number of timesteps in the time series data
+        num_blocks: Number of structurally similar computation blocks
+        num_attnlayers: Number of attention layers per block
+        num_attnheads: Number of attention heads
+        attn_actv: Activation function in attention modules
         """
         super().__init__()
         self.dim_latent = dim_latent
