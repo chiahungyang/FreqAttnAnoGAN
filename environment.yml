@@ -1,0 +1,15 @@
+name: AnoDet
+channels:
+  - defaults
+dependencies:
+  - python=3.8
+  - numpy
+  - scipy
+  - pandas
+  - conda-forge::scikit-learn
+  - pytorch::pytorch
+  - pytorch::torchvision
+  - pytorch::torchaudio
+  - pytorch::cpuonly
+  - conda-forge::pytorch-lightning[extra]
+  - conda-forge::sktime
