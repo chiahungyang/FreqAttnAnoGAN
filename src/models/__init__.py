@@ -3,6 +3,6 @@ from .freqattngan import FreqAttnAnoGenAdvNet
 
 
 __all__ = [
-    BaseAnoGenAdvNet,
-    FreqAttnAnoGenAdvNet
+    'BaseAnoGenAdvNet',
+    'FreqAttnAnoGenAdvNet'
 ]

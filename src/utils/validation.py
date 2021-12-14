@@ -1,4 +1,4 @@
-"""Utility modules and functions."""
+"""Utility functions for validation."""
 
 
 import torch
@@ -6,7 +6,6 @@ from torch import nn
 import numpy as np
 import scipy as sp
 import pandas as pd
-import math
 from sklearn.metrics import roc_curve, auc
 from sktime.transformations.panel.rocket import MiniRocketMultivariate
 
@@ -109,35 +108,7 @@ def roc_performance(labels: torch.Tensor, scores: torch.Tensor):
     roc_auc = auc(fpr, tpr)
     cutoff = threshold[np.argmax(tpr - fpr)]
     acc = ((scores >= cutoff) == labels).float().mean().item()
-
-
-class PositionalEncoding(nn.Module):
-    """
-    Position encoding layer for transformer-based modules.
-
-    This implementation is adopted from the Pytorch tutorial
-    https://pytorch.org/tutorials/beginner/transformer_tutorial.html.
-    """
-
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        pos = torch.arange(max_len).unsqueeze(0)
-        div = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(1, max_len, d_model)
-        pe[0, :, 0::2] = torch.sin(pos * div)
-        pe[0, :, 1::2] = torch.cos(pos * div)
-        self.register_buffer('pe', pe)
-
-    def forward(self, data: torch.Tensor):
-        """
-        Note
-        ----
-        The input tensor must have shape [batch_size, seq_len, embedding_dim].
-        """
-        data = data + self.pe[:, :data.size(1)]
-        return self.dropout(data)
+    return roc_auc, acc
 
 
 def main():
