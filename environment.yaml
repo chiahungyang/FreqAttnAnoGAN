@@ -13,3 +13,5 @@ dependencies:
   - pytorch::cpuonly
   - conda-forge::pytorch-lightning[extra]
   - conda-forge::sktime
+  - pip:
+    - jsonargparse[signatures]

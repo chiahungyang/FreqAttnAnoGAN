@@ -1,4 +1,4 @@
-"""Utility functions for validation."""
+"""Utility modules and functions for validation."""
 
 
 import torch
@@ -10,9 +10,9 @@ from sklearn.metrics import roc_curve, auc
 from sktime.transformations.panel.rocket import MiniRocketMultivariate
 
 
-class FrechetInceptionDistance(nn.Module):
+class FrechetInceptionDistance:
     """"
-    Frechet inception distance module.
+    Frechet inception distance module/closure.
 
     Notes
     -----
@@ -33,7 +33,7 @@ class FrechetInceptionDistance(nn.Module):
         super().__init__()
         self.feat = feature
     
-    def forward(self, real: torch.Tensor, fake: torch.Tensor):
+    def __call__(self, real: torch.Tensor, fake: torch.Tensor):
         """
         Return the Frechet incepction distance between features of the real
         and the generated data.
@@ -54,7 +54,7 @@ class FrechetInceptionDistance(nn.Module):
 
 class MiniRocket(nn.Module):
     """
-    MiniRocket module to extract features from time series
+    MiniRocket module to extract features from time series.
 
     Notes
     -----
