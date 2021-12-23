@@ -25,13 +25,14 @@ class FreqAttnAnoGenAdvNet(BaseAnoGenAdvNet):
         """
         Arguments
         ---------
-        dim_latent: Dimension of the latent space
-        num_vars: Number of variables in the time series data
-        num_steps: Number of timesteps in the time series data
-        gen_init_args: Keyword arguments passed to the generator
-        disc_init_args: Keyword arguments passed to the discriminator
-        enc_init_args: Keyword arguments passed to the encoder
-        kwargs: Keyword arguments passed to the AnoGenAdvNet superclass
+        Args:
+            dim_latent: Dimension of the latent space
+            num_vars: Number of variables in the time series data
+            num_steps: Number of timesteps in the time series data
+            gen_init_args: Keyword arguments passed to the generator
+            disc_init_args: Keyword arguments passed to the discriminator
+            enc_init_args: Keyword arguments passed to the encoder
+            kwargs: Keyword arguments passed to the AnoGenAdvNet superclass
         """
         args = (dim_latent, num_vars, num_steps)
         if gen_init_args is None: gen_init_args = {}
@@ -70,13 +71,14 @@ class FreqAttnEncoder(nn.Module):
         """
         Arguments
         ---------
-        dim_latent: Dimension of the latent space
-        num_vars: Number of variables in the time series data
-        num_steps: Number of timesteps in the time series data
-        num_blocks: Number of structurally similar computation blocks
-        num_attnlayers: Number of attention layers per block
-        num_attnheads: Number of attention heads
-        attn_actv: Activation function in attention modules
+        Args:
+            dim_latent: Dimension of the latent space
+            num_vars: Number of variables in the time series data
+            num_steps: Number of timesteps in the time series data
+            num_blocks: Number of structurally similar computation blocks
+            num_attnlayers: Number of attention layers per block
+            num_attnheads: Number of attention heads
+            attn_actv: Activation function in attention modules
         """
         super().__init__()
         self.dim_latent = dim_latent
@@ -91,7 +93,7 @@ class FreqAttnEncoder(nn.Module):
             np.log10(self.num_vars),
             np.log10(self.dim_latent),
             self.num_blocks+1,
-            dtype=int
+            dtype=int  ### FIXBUG: not rounding float to int
         )
         sizes_feats = np.logspace(
             np.log10(self.num_feats),
@@ -184,13 +186,14 @@ class FreqAttnDecoder(nn.Module):
         """
         Arguments
         ---------
-        dim_latent: Dimension of the latent space
-        num_vars: Number of variables in the time series data
-        num_steps: Number of timesteps in the time series data
-        num_blocks: Number of structurally similar computation blocks
-        num_attnlayers: Number of attention layers per block
-        num_attnheads: Number of attention heads
-        attn_actv: Activation function in attention modules
+        Args:
+            dim_latent: Dimension of the latent space
+            num_vars: Number of variables in the time series data
+            num_steps: Number of timesteps in the time series data
+            num_blocks: Number of structurally similar computation blocks
+            num_attnlayers: Number of attention layers per block
+            num_attnheads: Number of attention heads
+            attn_actv: Activation function in attention modules
         """
         super().__init__()
         self.dim_latent = dim_latent

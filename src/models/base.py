@@ -30,18 +30,19 @@ class BaseAnoGenAdvNet(pl.LightningModule):
         """
         Arguments
         ---------
-        generator: Generator module
-        extractor: Feature extractor module during discrimination
-        discriminator: Discriminator module following feature extractor
-        encoder: Encoder module
-        dim_latent: Dimension of latent space
-        training_phase: Indicator of `'adversarial'` or `'encoder'` training
-        ratio: Weight of feature matching error in anomaly score
-        penalty_coef: Coefficient of gradient penalty in adversarial training
-        fid_feat_init: Class and arguments to instantiate FID feature module
-        gen_opt_init: Class and arguments to instantiate optimizer of generator
-        disc_opt_init: Class and arguments to instantiate optimizer of discriminator
-        enc_opt_init: Class and arguments to instantiate optimizer of encoder
+        Args:
+            generator: Generator module
+            extractor: Feature extractor module during discrimination
+            discriminator: Discriminator module following feature extractor
+            encoder: Encoder module
+            dim_latent: Dimension of latent space
+            training_phase: Indicator of `'adversarial'` or `'encoder'` training
+            ratio: Weight of feature matching error in anomaly score
+            penalty_coef: Coefficient of gradient penalty in adversarial training
+            fid_feat_init: Class and arguments to instantiate FID feature module
+            gen_opt_init: Class and arguments to instantiate optimizer of generator
+            disc_opt_init: Class and arguments to instantiate optimizer of discriminator
+            enc_opt_init: Class and arguments to instantiate optimizer of encoder
 
         Pre-conditions
         --------------
