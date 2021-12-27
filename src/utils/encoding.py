@@ -18,11 +18,13 @@ class PositionalEncoding(nn.Module):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
 
-        pos = torch.arange(max_len).unsqueeze(0)
-        div = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pos = torch.arange(max_len).unsqueeze(1)
+        factor = -math.log(10000.0) / d_model
+        div_even = torch.exp(torch.arange(0, d_model, 2) * factor)
+        div_odd = torch.exp((torch.arange(1, d_model, 2) - 1) * factor)
         pe = torch.zeros(1, max_len, d_model)
-        pe[0, :, 0::2] = torch.sin(pos * div)
-        pe[0, :, 1::2] = torch.cos(pos * div)
+        pe[0, :, 0::2] = torch.sin(pos * div_even)
+        pe[0, :, 1::2] = torch.cos(pos * div_odd)
         self.register_buffer('pe', pe)
 
     def forward(self, data: torch.Tensor):
