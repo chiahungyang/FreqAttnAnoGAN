@@ -84,7 +84,7 @@ class BaseAnoGenAdvNet(pl.LightningModule):
                 'init_args': {}
             }
         self.fidfn = FrechetInceptionDistance(
-            instantiate_class(fid_feat_init)
+            instantiate_class((), fid_feat_init)
         )
         # Optimizer parameters
         if gen_opt_init is None:
