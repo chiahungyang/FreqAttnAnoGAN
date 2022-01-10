@@ -81,26 +81,21 @@ class FreqAttnEncoder(nn.Module):
             attn_actv: Activation function in attention modules
         """
         super().__init__()
-        self.dim_latent = dim_latent
-        self.num_vars = num_vars
-        self.num_feats = num_steps
-        self.num_blocks = num_blocks
-        self.num_attnlayers = num_attnlayers
-        self.num_attnheads = num_attnheads
-        self.attn_actv = attn_actv
         # Pre-compute input/output size of each block
-        sizes_vars = np.logspace(
-            np.log10(self.num_vars),
-            np.log10(self.dim_latent),
-            self.num_blocks+1,
-            dtype=int  ### FIXBUG: not rounding float to int
+        sizes_vars = np.around(np.logspace(
+            np.log10(num_vars),
+            np.log10(dim_latent),
+            num_blocks+1
+        )).astype(int)
+        sizes_vars, nums_heads = divisible_blocksizes_numattnheads(
+            sizes_vars,
+            num_attnheads
         )
-        sizes_feats = np.logspace(
-            np.log10(self.num_feats),
+        sizes_feats = np.around(np.logspace(
+            np.log10(num_steps),
             0,
-            self.num_blocks+1,
-            dtype=int
-        )
+            num_blocks+1
+        )).astype(int)
         sizes_kernel = sizes_feats[:-1] - sizes_feats[1:] + 1
         # Initialize modules in each block
         self.pos_encs = nn.ModuleList(
@@ -114,13 +109,13 @@ class FreqAttnEncoder(nn.Module):
                 nn.TransformerEncoder(
                     nn.TransformerEncoderLayer(
                         dim,
-                        self.num_attnheads,
-                        activation=self.attn_actv,
+                        nhead,
+                        activation=attn_actv,
                         batch_first=True
                     ),
-                    self.num_attnlayers
+                    num_attnlayers
                 )
-                for dim in sizes_vars[:-1]
+                for dim, nhead in zip(sizes_vars[:-1], nums_heads)
             ]
         )
         self.convs = nn.ModuleList(
@@ -196,26 +191,21 @@ class FreqAttnDecoder(nn.Module):
             attn_actv: Activation function in attention modules
         """
         super().__init__()
-        self.dim_latent = dim_latent
-        self.num_vars = num_vars
-        self.num_feats = num_steps
-        self.num_blocks = num_blocks
-        self.num_attnlayers = num_attnlayers
-        self.num_attnheads = num_attnheads
-        self.attn_actv = attn_actv
         # Pre-compute input/output size of each block
-        sizes_vars = np.logspace(
-            np.log10(self.dim_latent),
-            np.log10(self.num_vars),
-            self.num_blocks+1,
-            dtype=int
+        sizes_vars = np.around(np.logspace(
+            np.log10(dim_latent),
+            np.log10(num_vars),
+            num_blocks+1
+        )).astype(int)
+        sizes_vars, nums_heads = divisible_blocksizes_numattnheads(
+            sizes_vars,
+            num_attnheads
         )
-        sizes_feats = np.logspace(
+        sizes_feats = np.around(np.logspace(
             0,
-            np.log10(self.num_feats),
-            self.num_blocks+1,
-            dtype=int
-        )
+            np.log10(num_steps),
+            num_blocks+1
+        )).astype(int)
         sizes_kernel = sizes_feats[1:] - sizes_feats[:-1] + 1
         # Initialize modules in each block
         self.pos_encs = nn.ModuleList(
@@ -229,13 +219,13 @@ class FreqAttnDecoder(nn.Module):
                 nn.TransformerEncoder(
                     nn.TransformerEncoderLayer(
                         dim,
-                        self.num_attnheads,
-                        activation=self.attn_actv,
+                        nhead,
+                        activation=attn_actv,
                         batch_first=True
                     ),
-                    self.num_attnlayers
+                    num_attnlayers
                 )
-                for dim in sizes_vars[:-1]
+                for dim, nhead in zip(sizes_vars[:-1], nums_heads)
             ]
         )
         self.convs = nn.ModuleList(
@@ -287,6 +277,24 @@ class FreqAttnDecoder(nn.Module):
         latent = torch.view_as_complex(latent)
         data = torch.fft.irfft(latent, n=_len, norm="ortho")
         return data
+
+
+def divisible_blocksizes_numattnheads(sizes, num_attnheads):
+    """
+    Return block sizes and numbers of attention heads where the former is
+    divisible by the latter.
+    """
+    sizes = smaller_or_divisible(num_attnheads)(sizes)
+    nums = np.where(sizes[:-1] > num_attnheads, num_attnheads, 1)
+    return sizes, nums
+
+
+def smaller_or_divisible(num):
+    """
+    Return a vectorized function that modifies an array whose elements are
+    either smaller or divisible by a number.
+    """
+    return np.vectorize(lambda x: x if x < num else num * round(x / num))
 
 
 def main():
