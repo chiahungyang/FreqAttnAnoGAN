@@ -1,0 +1,21 @@
+model:
+  init_args:
+    training_phase: adversarial
+trainer:
+  max_epochs: 200
+  # gpus: 1
+  logger:
+    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: ./logs
+      sub_dir: adversarial
+  callbacks:
+  - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+    init_args:
+      monitor: FID
+      mode: min
+  - class_path: pytorch_lightning.callbacks.EarlyStopping
+    init_args:
+      monitor: FID
+      mode: min
+      patience: 5

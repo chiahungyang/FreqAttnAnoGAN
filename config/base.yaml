@@ -1,0 +1,42 @@
+name: base  # TODO: give this experiment a name
+data:
+  ### TODO: write datamodule specifications
+model:
+  class_path: src.models.FreqAttnAnoGenAdvNet
+  init_args:
+    dim_latent: 128
+    num_vars: 2  # TODO, ideally linked to data
+    num_steps: 10  # TODO, ideally linked to data
+    gen_init_args:
+      num_blocks: 4
+      num_attnlayers: 3
+      num_attnheads: 8
+      attn_actv: relu
+    disc_init_args:
+      num_blocks: 4
+      num_attnlayers: 3
+      num_attnheads: 8
+      attn_actv: gelu
+    enc_init_args:
+      num_blocks: 4
+      num_attnlayers: 3
+      num_attnheads: 8
+      attn_actv: gelu
+    ratio: 1.0
+    penalty_coef: 10.0
+    fid_feat_init: 
+      class_path: src.utils.MiniRocket
+      # init_args: {}
+optimizer:
+  generator:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 0.004
+  discriminator:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 0.001
+  encoder:
+    class_path: torch.optim.AdamW
+    init_args:
+      lr: 0.001

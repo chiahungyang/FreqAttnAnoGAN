@@ -1,0 +1,21 @@
+model:
+  init_args:
+    training_phase: encoder
+trainer:
+  max_epochs: 200
+  gpus: 1
+  logger:
+    class_path: pytorch_lightning.loggers.TensorBoardLogger
+    init_args:
+      save_dir: ./logs
+      sub_dir: encoder
+  callbacks:
+  - class_path: pytorch_lightning.callbacks.ModelCheckpoint
+    init_args:
+      monitor: Accuracy
+      mode: max
+  - class_path: pytorch_lightning.callbacks.EarlyStopping
+    init_args:
+      monitor: Accuracy
+      mode: max
+      patience: 5
