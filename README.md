@@ -1,0 +1,3 @@
+# FreqAttnAnoGAN
+
+This is an ongoing project of deep learning anomaly detection on time series data. The model adapts the [f-AnoGAN](https://www.sciencedirect.com/science/article/abs/pii/S1361841518302640) framework that was first proposed for medical images, and it utilizes a Transformer-based architecture where time series data are first transformed into the frequency domain and then undergo a sequence of attention mechanisms between different frequency components.
